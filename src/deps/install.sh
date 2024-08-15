@@ -1,19 +1,23 @@
 #!/bin/bash
 
 function do_and_check_cmd() {
-	if [ "$CHANGE_DIR" != "" ] ; then
+	if [ "$CHANGE_DIR" != "" ]; then
 		cd "$CHANGE_DIR" || return 1
 	fi
 	output=$("$@" 2>&1)
 	ret="$?"
-	if [ $ret -ne 0 ] ; then
+	if [ $ret -ne 0 ]; then
 		echo "❌ Error from command : $*"
 		echo "$output"
+		if [ -f "config.log" ]; then
+			echo "*** Contents of config.log:"
+			cat config.log
+		fi
 		exit $ret
 	fi
 }
 
-NTASK="$(nproc)"
+NTASK="${NTASK:-$(nproc)}"
 
 # Compiling and installing lua
 echo "ℹ️ Compiling and installing lua-5.1.5"
@@ -25,7 +29,7 @@ do_and_check_cmd make INSTALL_TOP=/usr/share/bunkerweb/deps install
 echo "ℹ️ Compiling and installing libmaxminddb"
 # TODO : temp fix run it twice...
 chmod +x /tmp/bunkerweb/deps/src/libmaxminddb/bootstrap
-cd /tmp/bunkerweb/deps/src/libmaxminddb && ./bootstrap > /dev/null 2>&1
+cd /tmp/bunkerweb/deps/src/libmaxminddb && ./bootstrap >/dev/null 2>&1
 export CHANGE_DIR="/tmp/bunkerweb/deps/src/libmaxminddb"
 do_and_check_cmd ./bootstrap
 do_and_check_cmd ./configure --prefix=/usr/share/bunkerweb/deps --disable-tests
@@ -200,7 +204,7 @@ CONFARGS="$(nginx -V 2>&1 | sed -n -e 's/^.*arguments: //p')"
 CONFARGS="${CONFARGS/-Os -fomit-frame-pointer -g/-Os}"
 CONFARGS="$(echo -n "$CONFARGS" | sed "s/--with-ld-opt=-Wl/--with-ld-opt='-lpcre -Wl'/")"
 CONFARGS="$(echo -n "$CONFARGS" | sed "s/--with-ld-opt='-Wl/--with-ld-opt='-lpcre -Wl/")"
-if [ "$OS" = "fedora" ] ; then
+if [ "$OS" = "fedora" ]; then
 	CONFARGS="$(echo -n "$CONFARGS" | sed "s/--with-ld-opt='.*'/--with-ld-opt=-lpcre/" | sed "s/--with-cc-opt='.*'//")"
 fi
 
@@ -209,8 +213,8 @@ export CFLAGS="$CFLAGS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1"
 
 export CHANGE_DIR="/tmp/bunkerweb/deps/src/nginx"
 do_and_check_cmd mv auto/configure ./
-echo '#!/bin/bash' > "/tmp/bunkerweb/deps/src/nginx/configure-fix.sh"
-echo "./configure $CONFARGS --add-dynamic-module=/tmp/bunkerweb/deps/src/headers-more-nginx-module --add-dynamic-module=/tmp/bunkerweb/deps/src/nginx_cookie_flag_module --add-dynamic-module=/tmp/bunkerweb/deps/src/lua-nginx-module --add-dynamic-module=/tmp/bunkerweb/deps/src/ngx_brotli --add-dynamic-module=/tmp/bunkerweb/deps/src/ngx_devel_kit --add-dynamic-module=/tmp/bunkerweb/deps/src/stream-lua-nginx-module" --add-dynamic-module=/tmp/bunkerweb/deps/src/modsecurity-nginx >> "/tmp/bunkerweb/deps/src/nginx/configure-fix.sh"
+echo '#!/bin/bash' >"/tmp/bunkerweb/deps/src/nginx/configure-fix.sh"
+echo "./configure $CONFARGS --add-dynamic-module=/tmp/bunkerweb/deps/src/headers-more-nginx-module --add-dynamic-module=/tmp/bunkerweb/deps/src/nginx_cookie_flag_module --add-dynamic-module=/tmp/bunkerweb/deps/src/lua-nginx-module --add-dynamic-module=/tmp/bunkerweb/deps/src/ngx_brotli --add-dynamic-module=/tmp/bunkerweb/deps/src/ngx_devel_kit --add-dynamic-module=/tmp/bunkerweb/deps/src/stream-lua-nginx-module" --add-dynamic-module=/tmp/bunkerweb/deps/src/modsecurity-nginx >>"/tmp/bunkerweb/deps/src/nginx/configure-fix.sh"
 
 do_and_check_cmd chmod +x "configure"
 do_and_check_cmd chmod +x "configure-fix.sh"
