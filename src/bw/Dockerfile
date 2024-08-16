@@ -12,7 +12,7 @@ COPY src/deps/deps.json deps.json
 COPY --chmod=644 src/deps/install.sh install.sh
 
 # Compile and install dependencies
-RUN NTASK=2 bash install.sh
+RUN bash install.sh
 
 WORKDIR /usr/share/bunkerweb
 

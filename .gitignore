@@ -1,5 +1,6 @@
 site/
 .idea/
+.build/
 .vscode/
 __pycache__
 env/
