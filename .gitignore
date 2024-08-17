@@ -17,3 +17,13 @@ src/ui/templates
 src/ui/builder
 src/ui/client/builder/*.json
 src/ui/client/builder/*.txt
+
+# Devenv
+.devenv*
+devenv.local.nix
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
