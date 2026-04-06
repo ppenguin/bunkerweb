@@ -24,3 +24,14 @@ src/ui/client/builder/*.json
 src/ui/client/builder/*.txt
 
 sync-fork.sh
+
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
