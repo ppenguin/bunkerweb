@@ -1,0 +1,21 @@
+name: Build and Push pp-dev Images
+
+on:
+  push:
+    branches: [devenv-dev]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - image: bunkerweb
+            dockerfile: src/bw/Dockerfile
+          - image: bunkerweb-scheduler
+            dockerfile: src/scheduler/Dockerfile
+    uses: ./.github/workflows/_pp-build-image.yml
+    with:
+      image: ${{ matrix.image }}
+      dockerfile: ${{ matrix.dockerfile }}
+    secrets: inherit

@@ -1,0 +1,51 @@
+name: Build Single pp-dev Image (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, ubuntu-24.04-arm]
+        include:
+          - platform: ubuntu-latest
+            arch: amd64
+          - platform: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.platform }}
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read and sanitize version
+        id: version
+        run: |
+          VERSION=$(cat src/VERSION | tr '~' '-')
+          echo "tag=ppdev-${VERSION}" >> $GITHUB_OUTPUT
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image }}:${{ steps.version.outputs.tag }}-${{ matrix.arch }}
+            ghcr.io/${{ github.repository_owner }}/${{ inputs.image }}:ppdev-${{ matrix.arch }}
