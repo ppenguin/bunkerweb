@@ -109,11 +109,13 @@ class Configurator:
         if isinstance(variables, str):
             self.__variables = self.__load_variables(Path(variables))
         else:
-            """
-            NOTE: we now allow _1mthe1_... like (domain) variables to support domain names starting with a number.
-            This means we immediately trim off starting _ from variable names here.
-            """
-            self.__variables = {k.lstrip("_"): v for k, v in variables.items()}
+            self.__variables = variables
+
+        """
+        NOTE: we now allow _1mthe1_... like (domain) variables to support domain names starting with a number.
+        This means we immediately trim off starting _ from variable names here.
+        """
+        self.__variables = {k.lstrip("_"): v for k, v in self.__variables.items()}
 
         self.__multisite = self.__variables.get("MULTISITE", "no") == "yes"
         self.__servers = self.__map_servers()
