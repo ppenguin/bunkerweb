@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from copy import deepcopy
 from functools import cache
 from json import loads
@@ -111,11 +112,20 @@ class Configurator:
         else:
             self.__variables = variables
 
-        """
-        NOTE: we now allow _1mthe1_... like (domain) variables to support domain names starting with a number.
-        This means we immediately trim off starting _ from variable names here.
-        """
-        self.__variables = {k.lstrip("_"): v for k, v in self.__variables.items()}
+        # Allow a leading underscore prefix on env var names so that domain names
+        # starting with a digit can be configured (bash forbids var names starting
+        # with a digit, e.g. 1nteresting.io).  Users write _1nteresting.io_USE_...
+        # and we strip the single leading underscore here before any other processing.
+        stripped: Dict[str, str] = {}
+        for k, v in self.__variables.items():
+            new_key = k.removeprefix("_")
+            if not new_key:
+                # Skip bare "_" or similar empty-after-strip keys
+                continue
+            if new_key in stripped:
+                self.__logger.warning(f"Variable collision after stripping leading underscore: both {k!r} and {new_key!r} exist, keeping last value")
+            stripped[new_key] = v
+        self.__variables = stripped
 
         self.__multisite = self.__variables.get("MULTISITE", "no") == "yes"
         self.__servers = self.__map_servers()
@@ -234,6 +244,18 @@ class Configurator:
             return {}
 
     def get_config(self, db=None, *, first_run: bool = False) -> Dict[str, str]:
+        # Supplement server list from database Services table.
+        # This ensures autoconf-managed services are recognized even when
+        # SERVER_NAME in the variables hasn't been updated yet (startup timing).
+        # Drafts are excluded so a half-configured service can never leak into
+        # the generated config and produce a server block.
+        if db and self.__multisite:
+            with suppress(Exception):
+                for service in db.get_services(with_drafts=False):
+                    server_id = service.get("id", "")
+                    if server_id and server_id not in self.__servers:
+                        self.__servers[server_id] = [server_id]
+
         config = {}
         template = self.__variables.get("USE_TEMPLATE", "")
 

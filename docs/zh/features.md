@@ -226,6 +226,28 @@ BunkerWeb 中的某些设置支持同一功能的多个配置。要定义多组�
     USE_UDP: "no"
     ```
 
+=== "禁用监听模式"
+
+    您可以通过将端口设置留空来禁用特定的监听模式：
+
+    ```yaml
+    # 禁用 HTTP 监听（仅 HTTPS）
+    HTTP_PORT: ""
+    HTTPS_PORT: "8443"
+
+    # 禁用 HTTPS 监听（仅 HTTP）
+    HTTP_PORT: "8080"
+    HTTPS_PORT: ""
+
+    # Stream：禁用非 SSL 监听（仅 SSL）
+    LISTEN_STREAM_PORT: ""
+    LISTEN_STREAM_PORT_SSL: "4242"
+
+    # Stream：禁用 SSL 监听（仅非 SSL）
+    LISTEN_STREAM_PORT: "1337"
+    LISTEN_STREAM_PORT_SSL: ""
+    ```
+
 ## ACME <img src='../../assets/img/pro-icon.svg' alt='crown pro icon' height='24px' width='24px' style='transform : translateY(3px);'> (PRO)
 
 
@@ -236,6 +258,7 @@ Advanced ACME certificate management with custom CA support, certificate monitor
 | 参数                                | 默认值      | 上下文    | 可重复 | 描述                                                                                                                                                                     |
 | ----------------------------------- | ----------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `USE_ACME`                          | `no`        | multisite | 否     | Enable ACME certificate management for this service using a custom ACME-compatible Certificate Authority.                                                                |
+| `ACME_PASSTHROUGH`                  | `no`        | multisite | 否     | Pass through ACME HTTP-01 challenge requests to the upstream server.                                                                                                     |
 | `ACME_DIRECTORY_URL`                |             | multisite | 否     | ACME directory URL of the Certificate Authority (e.g. https://ca.example.com/acme/directory for Step CA, https://vault.example.com/v1/pki/acme/directory for Vault PKI). |
 | `ACME_EMAIL`                        |             | multisite | 否     | Email address for ACME account registration and notifications.                                                                                                           |
 | `ACME_EAB_KID`                      |             | multisite | 否     | External Account Binding Key ID (required by some CAs like Sectigo, Google Trust Services).                                                                              |
@@ -343,6 +366,9 @@ BunkerWeb 允许您指定某些用户、IP 或请求应完全绕过 antibot 挑�
 !!! note "国家设置的行为"
       - 当同时设置 `ANTIBOT_IGNORE_COUNTRY` 和 `ANTIBOT_ONLY_COUNTRY` 时，忽略列表优先——同时出现在两个列表中的国家将绕过挑战。
       - 当设置了 `ANTIBOT_ONLY_COUNTRY` 且 IP 为私有或无法解析的地址时，由于无法确定国家代码，请求会绕过挑战。
+
+!!! tip "在子域之间共享挑战状态"
+    antibot 状态（包括 `turnstile`、`hcaptcha`、`recaptcha`、`mcaptcha`、`captcha`、`javascript` 和 `cookie`）会保存在 BunkerWeb 的[会话 Cookie](#sessions) 中。默认情况下，该 Cookie 仅作用于设置它的确切主机，因此用户如果在 `a.example.com` 上完成了挑战，在 `b.example.com` 上仍会再次被挑战。若要让同一可注册域名下的所有同级子域只需完成一次挑战，请为**每个相关服务器**将 [`SESSIONS_DOMAIN`](#sessions) 设置为父域名（例如 `example.com`）。`SESSIONS_DOMAIN` 是一项 multisite 设置，应按服务器分别配置，这样同一 BunkerWeb 实例上托管的无关租户就不会收到跨租户共享的 `Domain` 属性。
 
 **示例：**
 
@@ -1395,12 +1421,12 @@ STREAM 支持 :x:
 
 ### 配置设置
 
-| 设置                      | 默认值                     | 上下文    | 多个 | 描述                                                                      |
-| ------------------------- | -------------------------- | --------- | ---- | ------------------------------------------------------------------------- |
-| `USE_CLIENT_CACHE`        | `no`                       | multisite | 否   | **启用客户端缓存：** 设置为 `yes` 以启用静态文件的客户端缓存。            |
-| `CLIENT_CACHE_EXTENSIONS` | `jpg                       | jpeg      | png  | bmp                                                                       | ico | svg | tif | css | js | otf | ttf | eot | woff | woff2` | 全局 | 否 | **可缓存的扩展名：** 应由客户端缓存的文件扩展名列表（以管道符分隔）。 |
-| `CLIENT_CACHE_CONTROL`    | `public, max-age=15552000` | multisite | 否   | **Cache-Control 标头：** 用于控制缓存行为的 Cache-Control HTTP 标头的值。 |
-| `CLIENT_CACHE_ETAG`       | `yes`                      | multisite | 否   | **启用 ETags：** 设置为 `yes` 以发送静态资源的 HTTP ETag 标头。           |
+| 设置                      | 默认值                                                                    | 上下文    | 多个 | 描述                                                                      |
+| ------------------------- | ------------------------------------------------------------------------- | --------- | ---- | ------------------------------------------------------------------------- |
+| `USE_CLIENT_CACHE`        | `no`                                                                      | multisite | 否   | **启用客户端缓存：** 设置为 `yes` 以启用静态文件的客户端缓存。            |
+| `CLIENT_CACHE_EXTENSIONS` | `jpg\|jpeg\|png\|bmp\|ico\|svg\|tif\|css\|js\|otf\|ttf\|eot\|woff\|woff2` | 全局      | 否   | **可缓存的扩展名：** 应由客户端缓存的文件扩展名列表（以管道符分隔）。     |
+| `CLIENT_CACHE_CONTROL`    | `public, max-age=15552000`                                                | multisite | 否   | **Cache-Control 标头：** 用于控制缓存行为的 Cache-Control HTTP 标头的值。 |
+| `CLIENT_CACHE_ETAG`       | `yes`                                                                     | multisite | 否   | **启用 ETags：** 设置为 `yes` 以发送静态资源的 HTTP ETag 标头。           |
 
 !!! tip "优化缓存设置"
     对于频繁更新的内容，请考虑使用较短的 max-age 值。对于很少更改的内容（如带版本的 JavaScript 库或徽标），请使用较长的缓存时间。默认值 15552000 秒（180 天）适用于大多数静态资产。
@@ -1778,7 +1804,7 @@ CrowdSec 是一种现代的开源安全引擎，它基于行为分析和社区�
     services:
       bunkerweb:
         # 这是将用于在调度器中识别实例的名称
-        image: bunkerity/bunkerweb:1.6.10-rc2
+        image: bunkerity/bunkerweb:1.6.10-rc3
         ports:
           - "80:8080/tcp"
           - "443:8443/tcp"
@@ -1795,7 +1821,7 @@ CrowdSec 是一种现代的开源安全引擎，它基于行为分析和社区�
             syslog-address: "udp://10.20.30.254:514" # syslog 服务的 IP 地址
 
       bw-scheduler:
-        image: bunkerity/bunkerweb-scheduler:1.6.10-rc2
+        image: bunkerity/bunkerweb-scheduler:1.6.10-rc3
         environment:
           <<: *bw-env
           BUNKERWEB_INSTANCES: "bunkerweb" # 确保设置正确的实例名称
@@ -1829,7 +1855,7 @@ CrowdSec 是一种现代的开源安全引擎，它基于行为分析和社区�
           - bw-db
 
       crowdsec:
-        image: crowdsecurity/crowdsec:v1.7.6 # 使用最新版本，但为了更好的稳定性和安全性，请始终固定版本
+        image: crowdsecurity/crowdsec:v1.7.7 # 使用最新版本，但为了更好的稳定性和安全性，请始终固定版本
         volumes:
           - cs-data:/var/lib/crowdsec/data # 持久化 CrowdSec 数据
           - bw-logs:/var/log:ro # BunkerWeb 的日志，供 CrowdSec 解析
@@ -2999,39 +3025,39 @@ STREAM 支持 :x:
 
 LDAP-based single sign-on plugin with session-backed authentication.
 
-| 参数                              | 默认值                                       | 上下文                                                                                        | 可重复    | 描述                                                                               |
-| --------------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------- |
-| `USE_LDAP`                        | `no`                                         | multisite                                                                                     | 否        | Enable or disable LDAP SSO authentication.                                         |
-| `LDAP_HOST`                       |                                              | multisite                                                                                     | 否        | LDAP server hostname or IP address.                                                |
-| `LDAP_PORT`                       | `389`                                        | multisite                                                                                     | 否        | LDAP server port (389 for LDAP/STARTTLS, 636 for LDAPS).                           |
-| `LDAP_LDAPS`                      | `no`                                         | multisite                                                                                     | 否        | Use LDAPS (TLS from connection start).                                             |
-| `LDAP_STARTTLS`                   | `no`                                         | multisite                                                                                     | 否        | Use STARTTLS upgrade on LDAP connection.                                           |
-| `LDAP_SSL_VERIFY`                 | `yes`                                        | multisite                                                                                     | 否        | Verify server TLS certificate.                                                     |
-| `LDAP_TIMEOUT`                    | `10000`                                      | multisite                                                                                     | 否        | LDAP socket timeout in milliseconds.                                               |
-| `LDAP_KEEPALIVE_TIMEOUT`          | `60000`                                      | multisite                                                                                     | 否        | LDAP keepalive timeout in milliseconds.                                            |
-| `LDAP_KEEPALIVE_POOL_SIZE`        | `10`                                         | multisite                                                                                     | 否        | LDAP keepalive connection pool size.                                               |
-| `LDAP_KEEPALIVE_POOL_NAME`        |                                              | multisite                                                                                     | 否        | Optional custom LDAP keepalive pool name.                                          |
-| `LDAP_BIND_DN`                    |                                              | multisite                                                                                     | 否        | Optional service account DN used to perform LDAP user searches.                    |
-| `LDAP_BIND_PASSWORD`              |                                              | multisite                                                                                     | 否        | Password for LDAP Bind DN service account.                                         |
-| `LDAP_USER_SEARCH_BASE_DN`        |                                              | multisite                                                                                     | 否        | Base DN for user discovery search (enables enterprise search mode when set).       |
-| `LDAP_USER_SEARCH_FILTER`         | `(&(objectClass=person)(\|(uid={username})(mail={username})(sAMAccountName={username})(userPrincipalName={username})))` | multisite | 否                                                                                 | LDAP user search filter template. Use {username} placeholder. |
-| `LDAP_AUTHZ_FILTER`               |                                              | multisite                                                                                     | 否        | Optional extra LDAP authorization filter (AND-ed with user search filter).         |
-| `LDAP_USER_SEARCH_SCOPE`          | `subtree`                                    | multisite                                                                                     | 否        | LDAP search scope for user lookup.                                                 |
-| `LDAP_USER_SEARCH_DEREF_ALIASES`  | `always`                                     | multisite                                                                                     | 否        | LDAP alias dereferencing mode during user lookup.                                  |
-| `LDAP_USER_SEARCH_SIZE_LIMIT`     | `10`                                         | multisite                                                                                     | 否        | Maximum number of LDAP entries returned by user search.                            |
-| `LDAP_USER_SEARCH_TIME_LIMIT`     | `10`                                         | multisite                                                                                     | 否        | Maximum LDAP user search time in seconds.                                          |
-| `LDAP_USER_SEARCH_ATTRIBUTES`     | `dn`                                         | multisite                                                                                     | 否        | Attributes requested during user search (space separated).                         |
-| `LDAP_USER_SEARCH_DN_FIELD`       | `object_name`                                | multisite                                                                                     | 否        | Preferred field name in search response to extract user DN (e.g. object_name, dn). |
-| `LDAP_USER_SEARCH_REQUIRE_UNIQUE` | `yes`                                        | multisite                                                                                     | 否        | Require exactly one search result before authenticating user.                      |
-| `LDAP_USER_DN_TEMPLATE`           | `uid={username},ou=people,dc=example,dc=com` | multisite                                                                                     | 否        | User DN template used for direct bind fallback. Must include {username} when set.  |
-| `LDAP_USERNAME_REGEX`             | `^[A-Za-z0-9@._-]+$`                         | multisite                                                                                     | 否        | PCRE regex used to validate submitted usernames.                                   |
-| `LDAP_LOGIN_PATH`                 | `/ldap/login`                                | multisite                                                                                     | 否        | Login page path exposed by the LDAP plugin.                                        |
-| `LDAP_LOGOUT_PATH`                | `/ldap/logout`                               | multisite                                                                                     | 否        | Logout path exposed by the LDAP plugin.                                            |
-| `LDAP_SESSION_TTL`                | `3600`                                       | multisite                                                                                     | 否        | LDAP session validity duration in seconds.                                         |
-| `LDAP_REALM`                      | `LDAP SSO`                                   | multisite                                                                                     | 否        | Authentication realm displayed on LDAP login form.                                 |
-| `LDAP_USER_HEADER`                | `X-User`                                     | multisite                                                                                     | 否        | Header to pass authenticated username to upstream (empty to disable).              |
-| `LDAP_REDIRECT_AFTER_LOGIN`       | `/`                                          | multisite                                                                                     | 否        | Fallback relative path after successful login when no redirect target is provided. |
-| `LDAP_REDIRECT_AFTER_LOGOUT`      | `/`                                          | multisite                                                                                     | 否        | Relative path to redirect users to after logout.                                   |
+| 参数                              | 默认值                                                                                                                  | 上下文    | 可重复 | 描述                                                                               |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------- | ------ | ---------------------------------------------------------------------------------- |
+| `USE_LDAP`                        | `no`                                                                                                                    | multisite | 否     | Enable or disable LDAP SSO authentication.                                         |
+| `LDAP_HOST`                       |                                                                                                                         | multisite | 否     | LDAP server hostname or IP address.                                                |
+| `LDAP_PORT`                       | `389`                                                                                                                   | multisite | 否     | LDAP server port (389 for LDAP/STARTTLS, 636 for LDAPS).                           |
+| `LDAP_LDAPS`                      | `no`                                                                                                                    | multisite | 否     | Use LDAPS (TLS from connection start).                                             |
+| `LDAP_STARTTLS`                   | `no`                                                                                                                    | multisite | 否     | Use STARTTLS upgrade on LDAP connection.                                           |
+| `LDAP_SSL_VERIFY`                 | `yes`                                                                                                                   | multisite | 否     | Verify server TLS certificate.                                                     |
+| `LDAP_TIMEOUT`                    | `10000`                                                                                                                 | multisite | 否     | LDAP socket timeout in milliseconds.                                               |
+| `LDAP_KEEPALIVE_TIMEOUT`          | `60000`                                                                                                                 | multisite | 否     | LDAP keepalive timeout in milliseconds.                                            |
+| `LDAP_KEEPALIVE_POOL_SIZE`        | `10`                                                                                                                    | multisite | 否     | LDAP keepalive connection pool size.                                               |
+| `LDAP_KEEPALIVE_POOL_NAME`        |                                                                                                                         | multisite | 否     | Optional custom LDAP keepalive pool name.                                          |
+| `LDAP_BIND_DN`                    |                                                                                                                         | multisite | 否     | Optional service account DN used to perform LDAP user searches.                    |
+| `LDAP_BIND_PASSWORD`              |                                                                                                                         | multisite | 否     | Password for LDAP Bind DN service account.                                         |
+| `LDAP_USER_SEARCH_BASE_DN`        |                                                                                                                         | multisite | 否     | Base DN for user discovery search (enables enterprise search mode when set).       |
+| `LDAP_USER_SEARCH_FILTER`         | `(&(objectClass=person)(\|(uid={username})(mail={username})(sAMAccountName={username})(userPrincipalName={username})))` | multisite | 否     | LDAP user search filter template. Use {username} placeholder.                      |
+| `LDAP_AUTHZ_FILTER`               |                                                                                                                         | multisite | 否     | Optional extra LDAP authorization filter (AND-ed with user search filter).         |
+| `LDAP_USER_SEARCH_SCOPE`          | `subtree`                                                                                                               | multisite | 否     | LDAP search scope for user lookup.                                                 |
+| `LDAP_USER_SEARCH_DEREF_ALIASES`  | `always`                                                                                                                | multisite | 否     | LDAP alias dereferencing mode during user lookup.                                  |
+| `LDAP_USER_SEARCH_SIZE_LIMIT`     | `10`                                                                                                                    | multisite | 否     | Maximum number of LDAP entries returned by user search.                            |
+| `LDAP_USER_SEARCH_TIME_LIMIT`     | `10`                                                                                                                    | multisite | 否     | Maximum LDAP user search time in seconds.                                          |
+| `LDAP_USER_SEARCH_ATTRIBUTES`     | `dn`                                                                                                                    | multisite | 否     | Attributes requested during user search (space separated).                         |
+| `LDAP_USER_SEARCH_DN_FIELD`       | `object_name`                                                                                                           | multisite | 否     | Preferred field name in search response to extract user DN (e.g. object_name, dn). |
+| `LDAP_USER_SEARCH_REQUIRE_UNIQUE` | `yes`                                                                                                                   | multisite | 否     | Require exactly one search result before authenticating user.                      |
+| `LDAP_USER_DN_TEMPLATE`           | `uid={username},ou=people,dc=example,dc=com`                                                                            | multisite | 否     | User DN template used for direct bind fallback. Must include {username} when set.  |
+| `LDAP_USERNAME_REGEX`             | `^[A-Za-z0-9@._-]+$`                                                                                                    | multisite | 否     | PCRE regex used to validate submitted usernames.                                   |
+| `LDAP_LOGIN_PATH`                 | `/ldap/login`                                                                                                           | multisite | 否     | Login page path exposed by the LDAP plugin.                                        |
+| `LDAP_LOGOUT_PATH`                | `/ldap/logout`                                                                                                          | multisite | 否     | Logout path exposed by the LDAP plugin.                                            |
+| `LDAP_SESSION_TTL`                | `3600`                                                                                                                  | multisite | 否     | LDAP session validity duration in seconds.                                         |
+| `LDAP_REALM`                      | `LDAP SSO`                                                                                                              | multisite | 否     | Authentication realm displayed on LDAP login form.                                 |
+| `LDAP_USER_HEADER`                | `X-User`                                                                                                                | multisite | 否     | Header to pass authenticated username to upstream (empty to disable).              |
+| `LDAP_REDIRECT_AFTER_LOGIN`       | `/`                                                                                                                     | multisite | 否     | Fallback relative path after successful login when no redirect target is provided. |
+| `LDAP_REDIRECT_AFTER_LOGOUT`      | `/`                                                                                                                     | multisite | 否     | Relative path to redirect users to after logout.                                   |
 
 ## Let's Encrypt
 
@@ -3077,29 +3103,30 @@ Let's Encrypt 插件通过自动化创建、续订和配置来自 Let's Encrypt 
 
 ### 配置设置
 
-| 设置                                        | 默认值        | 上下文    | 多选 | 描述                                                                                                                                                                               |
-| ------------------------------------------- | ------------- | --------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AUTO_LETS_ENCRYPT`                         | `no`          | multisite | 否   | **启用 Let's Encrypt：** 设置为 `yes` 以启用自动证书颁发和续订。                                                                                                                   |
-| `LETS_ENCRYPT_PASSTHROUGH`                  | `no`          | multisite | 否   | **传递 Let's Encrypt 请求：** 设置为 `yes` 以将 Let's Encrypt 请求传递给 Web 服务器。当 BunkerWeb 位于处理 SSL 的另一个反向代理前面时，此功能很有用。                              |
-| `EMAIL_LETS_ENCRYPT`                        | `-`           | multisite | 否   | **联系电子邮件：** 用于 Let's Encrypt 到期提醒的电子邮件地址。只有在接受不接收任何警报或恢复邮件的情况下才可留空（此时 Certbot 会使用 `--register-unsafely-without-email` 注册）。 |
-| `LETS_ENCRYPT_SERVER`                       | `letsencrypt` | multisite | 否   | **证书颁发机构：** 选择用于签发证书的 ACME 服务器。可选值：`letsencrypt` 或 `zerossl`。                                                                                            |
-| `LETS_ENCRYPT_ZEROSSL_API_KEY`              |               | multisite | 否   | **ZeroSSL API 密钥：** 当 `LETS_ENCRYPT_SERVER=zerossl` 时由 `zerossl-bot` 使用的可选密钥。若为空，则使用 `EMAIL_LETS_ENCRYPT` 获取 EAB 凭据。                                     |
-| `LETS_ENCRYPT_ZEROSSL_API_RETRY`            | `3`           | multisite | 否   | **ZeroSSL API 重试次数：** `zerossl-bot` 发起 ZeroSSL API 请求时的重试次数（`0` 表示禁用重试）。                                                                                   |
-| `LETS_ENCRYPT_ZEROSSL_API_RETRY_DELAY`      | `2`           | multisite | 否   | **ZeroSSL API 重试延迟：** `zerossl-bot` 中 ZeroSSL API 重试之间的延迟秒数。                                                                                                       |
-| `LETS_ENCRYPT_ZEROSSL_API_CONNECT_TIMEOUT`  | `5`           | multisite | 否   | **ZeroSSL API 连接超时：** `zerossl-bot` 中 ZeroSSL API 调用的连接超时时间（秒）。                                                                                                 |
-| `LETS_ENCRYPT_ZEROSSL_API_MAX_TIME`         | `20`          | multisite | 否   | **ZeroSSL API 最大时长：** `zerossl-bot` 中每次 ZeroSSL API 调用允许的最大总时长（秒）。                                                                                           |
-| `LETS_ENCRYPT_CHALLENGE`                    | `http`        | multisite | 否   | **验证类型：** 用于验证域名所有权的方法。选项：`http` 或 `dns`。                                                                                                                   |
-| `LETS_ENCRYPT_DNS_PROVIDER`                 |               | multisite | 否   | **DNS 提供商：** 使用 DNS 验证时，要使用的 DNS 提供商（例如 cloudflare、route53、digitalocean）。                                                                                  |
-| `LETS_ENCRYPT_DNS_PROPAGATION`              | `default`     | multisite | 否   | **DNS 传播：** 等待 DNS 传播的时间（秒）。如果未提供值，则使用提供商的默认传播时间。                                                                                               |
-| `LETS_ENCRYPT_DNS_CREDENTIAL_ITEM`          |               | multisite | 是   | **凭证项：** 用于 DNS 提供商身份验证的配置项（例如 `cloudflare_api_token 123456`）。值可以是原始文本、base64 编码或 JSON 对象。                                                    |
-| `LETS_ENCRYPT_DNS_CREDENTIAL_DECODE_BASE64` | `yes`         | multisite | 否   | **自动解码 Base64 DNS 凭据：** 启用后自动解码 base64 编码的 DNS 提供商凭据（`rfc2136` 提供商除外）。如果凭据故意为 base64，请设置为 `no`。                                         |
-| `USE_LETS_ENCRYPT_WILDCARD`                 | `no`          | multisite | 否   | **通配符证书：** 设置为 `yes` 时，为所有域名创建通配符证书。仅适用于 DNS 验证。                                                                                                    |
-| `USE_LETS_ENCRYPT_STAGING`                  | `no`          | multisite | 否   | **使用测试环境：** 设置为 `yes` 时，使用 Let's Encrypt 的测试环境进行测试。测试环境的速率限制较高，但生成的证书不受浏览器信任。                                                    |
-| `LETS_ENCRYPT_CLEAR_OLD_CERTS`              | `no`          | global    | 否   | **清除旧证书：** 设置为 `yes` 时，在续订期间删除不再需要的旧证书。                                                                                                                 |
-| `LETS_ENCRYPT_CONCURRENT_REQUESTS`          | `no`          | global    | 否   | **并发请求：** 设置为 `yes` 时，certbot-new 将并发发起证书请求。请谨慎使用以避免速率限制。                                                                                         |
-| `LETS_ENCRYPT_PROFILE`                      | `classic`     | multisite | 否   | **证书配置文件：** 选择要使用的证书配置文件。选项：`classic`（通用）、`tlsserver`（针对 TLS 服务器优化）或 `shortlived`（7 天证书）。                                              |
-| `LETS_ENCRYPT_CUSTOM_PROFILE`               |               | multisite | 否   | **自定义证书配置文件：** 如果您的 ACME 服务器支持非标准配置文件，请输入自定义证书配置文件。如果设置了此项，它将覆盖 `LETS_ENCRYPT_PROFILE`。                                       |
-| `LETS_ENCRYPT_MAX_RETRIES`                  | `3`           | multisite | 否   | **最大重试次数：** 证书生成失败时重试的次数。设置为 `0` 以禁用重试。用于处理临时网络问题或 API 速率限制。                                                                          |
+| 设置                                        | 默认值        | 上下文    | 多选 | 描述                                                                                                                                                                                 |
+| ------------------------------------------- | ------------- | --------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AUTO_LETS_ENCRYPT`                         | `no`          | multisite | 否   | **启用 Let's Encrypt：** 设置为 `yes` 以启用自动证书颁发和续订。                                                                                                                     |
+| `LETS_ENCRYPT_PASSTHROUGH`                  | `no`          | multisite | 否   | **传递 Let's Encrypt 请求：** 设置为 `yes` 以将 Let's Encrypt 请求传递给 Web 服务器。当 BunkerWeb 位于处理 SSL 的另一个反向代理前面时，此功能很有用。                                |
+| `EMAIL_LETS_ENCRYPT`                        | `-`           | multisite | 否   | **联系电子邮件：** 用于 Let's Encrypt 到期提醒的电子邮件地址。只有在接受不接收任何警报或恢复邮件的情况下才可留空（此时 Certbot 会使用 `--register-unsafely-without-email` 注册）。   |
+| `LETS_ENCRYPT_SERVER`                       | `letsencrypt` | multisite | 否   | **证书颁发机构：** 选择用于签发证书的 ACME 服务器。可选值：`letsencrypt` 或 `zerossl`。                                                                                              |
+| `LETS_ENCRYPT_ZEROSSL_API_KEY`              |               | multisite | 否   | **ZeroSSL API 密钥：** 当 `LETS_ENCRYPT_SERVER=zerossl` 时由 `zerossl-bot` 使用的可选密钥。若为空，则使用 `EMAIL_LETS_ENCRYPT` 获取 EAB 凭据。                                       |
+| `LETS_ENCRYPT_ZEROSSL_API_RETRY`            | `3`           | multisite | 否   | **ZeroSSL API 重试次数：** `zerossl-bot` 发起 ZeroSSL API 请求时的重试次数（`0` 表示禁用重试）。                                                                                     |
+| `LETS_ENCRYPT_ZEROSSL_API_RETRY_DELAY`      | `2`           | multisite | 否   | **ZeroSSL API 重试延迟：** `zerossl-bot` 中 ZeroSSL API 重试之间的延迟秒数。                                                                                                         |
+| `LETS_ENCRYPT_ZEROSSL_API_CONNECT_TIMEOUT`  | `5`           | multisite | 否   | **ZeroSSL API 连接超时：** `zerossl-bot` 中 ZeroSSL API 调用的连接超时时间（秒）。                                                                                                   |
+| `LETS_ENCRYPT_ZEROSSL_API_MAX_TIME`         | `20`          | multisite | 否   | **ZeroSSL API 最大时长：** `zerossl-bot` 中每次 ZeroSSL API 调用允许的最大总时长（秒）。                                                                                             |
+| `LETS_ENCRYPT_CHALLENGE`                    | `http`        | multisite | 否   | **验证类型：** 用于验证域名所有权的方法。选项：`http` 或 `dns`。                                                                                                                     |
+| `LETS_ENCRYPT_DNS_PROVIDER`                 |               | multisite | 否   | **DNS 提供商：** 使用 DNS 验证时，要使用的 DNS 提供商（例如 cloudflare、route53、digitalocean）。                                                                                    |
+| `LETS_ENCRYPT_DNS_PROPAGATION`              | `default`     | multisite | 否   | **DNS 传播：** 等待 DNS 传播的时间（秒）。如果未提供值，则使用提供商的默认传播时间。                                                                                                 |
+| `LETS_ENCRYPT_DNS_CREDENTIAL_ITEM`          |               | multisite | 是   | **凭证项：** 用于 DNS 提供商身份验证的配置项（例如 `cloudflare_api_token 123456`）。值可以是原始文本、base64 编码或 JSON 对象。                                                      |
+| `LETS_ENCRYPT_DNS_CREDENTIAL_DECODE_BASE64` | `yes`         | multisite | 否   | **自动解码 Base64 DNS 凭据：** 启用后自动解码 base64 编码的 DNS 提供商凭据（`rfc2136` 提供商除外）。如果凭据故意为 base64，请设置为 `no`。                                           |
+| `USE_LETS_ENCRYPT_WILDCARD`                 | `no`          | multisite | 否   | **通配符证书：** 设置为 `yes` 时，为所有域名创建通配符证书。仅适用于 DNS 验证。                                                                                                      |
+| `USE_LETS_ENCRYPT_STAGING`                  | `no`          | multisite | 否   | **使用测试环境：** 设置为 `yes` 时，使用 Let's Encrypt 的测试环境进行测试。测试环境的速率限制较高，但生成的证书不受浏览器信任。                                                      |
+| `LETS_ENCRYPT_CLEAR_OLD_CERTS`              | `no`          | global    | 否   | **清除旧证书：** 设置为 `yes` 时，在续订期间删除不再需要的旧证书。                                                                                                                   |
+| `LETS_ENCRYPT_CONCURRENT_REQUESTS`          | `no`          | global    | 否   | **并发请求：** 设置为 `yes` 时，certbot-new 将并发发起证书请求。请谨慎使用以避免速率限制。                                                                                           |
+| `LETS_ENCRYPT_PROFILE`                      | `classic`     | multisite | 否   | **证书配置文件：** 选择要使用的证书配置文件。选项：`classic`（通用）、`tlsserver`（针对 TLS 服务器优化）或 `shortlived`（7 天证书）。                                                |
+| `LETS_ENCRYPT_CUSTOM_PROFILE`               |               | multisite | 否   | **自定义证书配置文件：** 如果您的 ACME 服务器支持非标准配置文件，请输入自定义证书配置文件。如果设置了此项，它将覆盖 `LETS_ENCRYPT_PROFILE`。                                         |
+| `LETS_ENCRYPT_MAX_RETRIES`                  | `3`           | multisite | 否   | **最大重试次数：** 证书生成失败时重试的次数。设置为 `0` 以禁用重试。用于处理临时网络问题或 API 速率限制。                                                                            |
+| `LETS_ENCRYPT_MAX_LOG_BACKUPS`              | `50`          | global    | 否   | **Certbot 日志备份上限：** Certbot 每个任务保留的轮转 `letsencrypt.log` 备份数量。Certbot 自带的默认值 `1000` 很容易迅速堆积；`50` 是一个更合理的上限。设置为 `0` 时仅保留当前日志。 |
 
 !!! info "信息和行为"
     - `LETS_ENCRYPT_DNS_CREDENTIAL_ITEM` 设置是一个多选设置，可用于为 DNS 提供商设置多个项目。这些项目将保存为缓存文件，Certbot 将从中读取凭据。
@@ -3521,13 +3548,13 @@ STREAM 支持 :warning:
 | 设置                                 | 默认值   | 上下文    | 多选 | 描述                                                                                             |
 | ------------------------------------ | -------- | --------- | ---- | ------------------------------------------------------------------------------------------------ |
 | `USE_METRICS`                        | `yes`    | multisite | 否   | **启用指标：** 设置为 `yes` 以启用指标的收集和检索。                                             |
-| `METRICS_MEMORY_SIZE`                | `16m`    | global    | 否   | **内存大小：** 指标内部存储的大小（例如，`16m`、`32m`）。                                        |
+| `METRICS_MEMORY_SIZE`                | `16m`    | global    | 否   | **内存大小：** 指标内部存储的大小（例如，`8192`、`16m`、`32m`）。                                |
 | `METRICS_MAX_BLOCKED_REQUESTS`       | `1000`   | global    | 否   | **最大被阻止请求数：** 每个工作进程要存储的最大被阻止请求数。                                    |
 | `METRICS_MAX_BLOCKED_REQUESTS_REDIS` | `100000` | global    | 否   | **Redis 最大被阻止请求数：** 在 Redis 中要存储的最大被阻止请求数。                               |
 | `METRICS_SAVE_TO_REDIS`              | `yes`    | global    | 否   | **将指标保存到 Redis：** 设置为 `yes` 以将指标（计数器和表）保存到 Redis，以实现集群范围的聚合。 |
 
 !!! tip "调整内存分配大小"
-    应根据您的流量和实例数量调整 `METRICS_MEMORY_SIZE` 设置。对于高流量网站，请考虑增加此值以确保所有指标都能被捕获而不会丢失数据。
+    应根据您的流量和实例数量调整 `METRICS_MEMORY_SIZE` 设置。支持原始字节值以及 `k`/`m` 后缀。对于高流量网站，请考虑增加此值以确保所有指标都能被捕获而不会丢失数据。
 
 !!! info "Redis 集成"
     当 BunkerWeb 配置为使用[Redis](#redis)时，指标插件将自动将被阻止的请求数据同步到 Redis 服务器。这提供了跨多个 BunkerWeb 实例的安全事件的集中视图。
@@ -3671,16 +3698,16 @@ STREAM 支持 :warning:
 
     此功能使用 `ALLOWED_METHODS` 设置进行配置，其中方法用 `|` 分隔（默认值：`GET|POST|HEAD`）。如果客户端尝试使用未列出的方法，服务器将以 **405 - Method Not Allowed** 状态响应。
 
-    对于大多数网站，默认的 `GET|POST|HEAD` 就足够了。如果您的应用程序使用 RESTful API，您可能需要包含 `PUT` 和 `DELETE` 等方法。
+    对于大多数网站，默认的 `GET|POST|HEAD` 就足够了。如果您的应用程序使用 RESTful API，您可能需要包含 `PUT` 和 `DELETE` 等方法。自定义的大写方法还可以包含下划线和连字符，以兼容非标准协议（例如 `CCM_POST`、`M-SEARCH`）。
 
     !!! success "安全优势"
         - 防止利用未使用或不必要的 HTTP 方法
         - 通过禁用可能有害的方法来减少攻击面
         - 阻止攻击者使用的 HTTP 方法枚举技术
 
-    | 设置              | 默认值 | 上下文 | 多选  | 描述      |
-    | ----------------- | ------ | ------ | ----- | --------- |
-    | `ALLOWED_METHODS` | `GET   | POST   | HEAD` | multisite | no | **HTTP 方法：** 允许的 HTTP 方法列表，用竖线字符分隔。 |
+    | 设置              | 默认值            | 上下文    | 多选 | 描述                                                                                         |
+    | ----------------- | ----------------- | --------- | ---- | -------------------------------------------------------------------------------------------- |
+    | `ALLOWED_METHODS` | `GET\|POST\|HEAD` | multisite | no   | **HTTP 方法：** 允许的 HTTP 方法列表，用竖线字符分隔。自定义大写方法可以包含下划线和连字符。 |
 
     !!! abstract "CORS 和预检请求"
         如果您的应用程序支持[跨源资源共享 (CORS)](#cors)，您应该在 `ALLOWED_METHODS` 设置中包含 `OPTIONS` 方法以处理预检请求。这确保了浏览器发出跨源请求时的正常功能。
@@ -5555,34 +5582,36 @@ STREAM 支持 :white_check_mark:
 
 **工作原理：**
 
-1.  当用户首次与您的网站互动时，BunkerWeb 会创建一个唯一的会话标识符。
-2.  此标识符安全地存储在用户浏览器的 Cookie 中。
-3.  在后续请求中，BunkerWeb 从 Cookie 中检索会话标识符，并使用它来访问用户的会话数据。
-4.  对于具有多个 BunkerWeb 实例的分布式环境，会话数据可以本地存储或存储在 [Redis](#redis) 中。
-5.  会话通过可配置的超时进行自动管理，在保持可用性的同时确保安全性。
-6.  会话的加密安全性通过用于签署会话 Cookie 的密钥来保证。
+1. 当用户首次与您的网站互动时，BunkerWeb 会创建一个唯一的会话标识符。
+2. 此标识符安全地存储在用户浏览器的 Cookie 中。
+3. 在后续请求中，BunkerWeb 从 Cookie 中检索会话标识符，并使用它来访问用户的会话数据。
+4. 对于具有多个 BunkerWeb 实例的分布式环境，会话数据可以本地存储或存储在 [Redis](#redis) 中。
+5. 会话通过可配置的超时进行自动管理，在保持可用性的同时确保安全性。
+6. 会话的加密安全性通过用于签署会话 Cookie 的密钥来保证。
 
 ### 如何使用
 
 请按照以下步骤配置和使用会话功能：
 
-1.  **配置会话安全性：** 设置一个强大的、唯一的 `SESSIONS_SECRET`，以确保会话 Cookie 无法被伪造。（默认值为“random”，这会触发 BunkerWeb 生成一个随机的密钥。）
-2.  **选择会话名称：** 可选地自定义 `SESSIONS_NAME`，以定义您的会话 Cookie 在浏览器中的名称。（默认值为“random”，这会触发 BunkerWeb 生成一个随机的名称。）
-3.  **设置会话超时：** 使用超时设置（`SESSIONS_IDLING_TIMEOUT`、`SESSIONS_ROLLING_TIMEOUT`、`SESSIONS_ABSOLUTE_TIMEOUT`）配置会话的有效时长。
-4.  **配置 Redis 集成：** 对于分布式环境，将 `USE_REDIS` 设置为“yes”，并配置您的 [Redis 连接](#redis) 以在多个 BunkerWeb 节点之间共享会话数据。
-5.  **让 BunkerWeb 处理其余部分：** 配置完成后，您的网站会自动进行会话管理。
+1. **配置会话安全性：** 设置一个强大的、唯一的 `SESSIONS_SECRET`，以确保会话 Cookie 无法被伪造。（默认值为“random”，这会触发 BunkerWeb 生成一个随机的密钥。）
+2. **选择会话名称：** 可选地自定义 `SESSIONS_NAME`，以定义您的会话 Cookie 在浏览器中的名称。（默认值为“random”，这会触发 BunkerWeb 生成一个随机的名称。）
+3. **设置会话超时：** 使用超时设置（`SESSIONS_IDLING_TIMEOUT`、`SESSIONS_ROLLING_TIMEOUT`、`SESSIONS_ABSOLUTE_TIMEOUT`）配置会话的有效时长。
+4. **在子域之间共享 Cookie（可选，按服务器配置）：** 默认情况下，会话 Cookie 仅作用于主机本身。如果某个服务器托管了同一可注册域名下的多个子域（例如 `a.example.com` 和 `b.example.com`），并且您希望反机器人/挑战状态能够共用，请仅在该服务器上将 `SESSIONS_DOMAIN` 设置为父域名（`example.com`）。`SESSIONS_DOMAIN` 是一项 multisite 设置，因此同一 BunkerWeb 实例上的无关租户不会收到跨租户共享的 `Domain` 属性。
+5. **配置 Redis 集成：** 对于分布式环境，将 `USE_REDIS` 设置为“yes”，并配置您的 [Redis 连接](#redis) 以在多个 BunkerWeb 节点之间共享会话数据。
+6. **让 BunkerWeb 处理其余部分：** 配置完成后，您的网站会自动进行会话管理。
 
 ### 配置设置
 
-| 设置                        | 默认值   | 上下文 | 多选 | 描述                                                                                              |
-| --------------------------- | -------- | ------ | ---- | ------------------------------------------------------------------------------------------------- |
-| `SESSIONS_SECRET`           | `random` | global | 否   | **会话密钥：** 用于签署会话 Cookie 的加密密钥。应该是一个强大的、随机的、对您的站点唯一的字符串。 |
-| `SESSIONS_NAME`             | `random` | global | 否   | **Cookie 名称：** 将存储会话标识符的 Cookie 的名称。                                              |
-| `SESSIONS_IDLING_TIMEOUT`   | `1800`   | global | 否   | **空闲超时：** 会话在失效前不活动的最长时间（以秒为单位）。                                       |
-| `SESSIONS_ROLLING_TIMEOUT`  | `3600`   | global | 否   | **滚动超时：** 会话必须续订前的最长时间（以秒为单位）。                                           |
-| `SESSIONS_ABSOLUTE_TIMEOUT` | `86400`  | global | 否   | **绝对超时：** 无论活动如何，会话被销毁前的最长时间（以秒为单位）。                               |
-| `SESSIONS_CHECK_IP`         | `yes`    | global | 否   | **检查 IP：** 设置为 `yes` 时，如果客户端 IP 地址发生变化，则销毁会话。                           |
-| `SESSIONS_CHECK_USER_AGENT` | `yes`    | global | 否   | **检查 User-Agent：** 设置为 `yes` 时，如果客户端 User-Agent 发生变化，则销毁会话。               |
+| 设置                        | 默认值   | 上下文    | 多选 | 描述                                                                                                                                                                                                 |
+| --------------------------- | -------- | --------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSIONS_SECRET`           | `random` | global    | 否   | **会话密钥：** 用于签署会话 Cookie 的加密密钥。应该是一个强大的、随机的、对您的站点唯一的字符串。                                                                                                    |
+| `SESSIONS_NAME`             | `random` | global    | 否   | **Cookie 名称：** 将存储会话标识符的 Cookie 的名称。                                                                                                                                                 |
+| `SESSIONS_DOMAIN`           |          | multisite | 否   | **Cookie 域：** 应用于会话 Cookie 的可选 `Domain` 属性（例如 `example.com`）。留空则保持 Cookie 仅作用于主机。按服务器配置它，以便在同一可注册域名下的同级子域之间共享会话状态（反机器人、挑战等）。 |
+| `SESSIONS_IDLING_TIMEOUT`   | `1800`   | global    | 否   | **空闲超时：** 会话在失效前允许保持不活动的最长时间（以秒为单位）。                                                                                                                                  |
+| `SESSIONS_ROLLING_TIMEOUT`  | `3600`   | global    | 否   | **滚动超时：** 会话在必须续订之前允许存在的最长时间（以秒为单位）。                                                                                                                                  |
+| `SESSIONS_ABSOLUTE_TIMEOUT` | `86400`  | global    | 否   | **绝对超时：** 无论活动情况如何，会话在被销毁前允许存在的最长时间（以秒为单位）。                                                                                                                    |
+| `SESSIONS_CHECK_IP`         | `yes`    | global    | 否   | **检查 IP：** 设置为 `yes` 时，如果客户端 IP 地址发生变化，则销毁会话。                                                                                                                              |
+| `SESSIONS_CHECK_USER_AGENT` | `yes`    | global    | 否   | **检查 User-Agent：** 设置为 `yes` 时，如果客户端 User-Agent 发生变化，则销毁会话。                                                                                                                  |
 
 !!! warning "安全注意事项"
     `SESSIONS_SECRET` 设置对安全至关重要。在生产环境中：
@@ -5652,6 +5681,39 @@ STREAM 支持 :white_check_mark:
     SESSIONS_ROLLING_TIMEOUT: "172800"  # 2 天
     SESSIONS_ABSOLUTE_TIMEOUT: "604800"  # 7 天
     ```
+
+=== "跨子域会话（单一租户）"
+
+    在 `example.com` 的所有子域之间共享会话 Cookie，这样整个站点的反机器人/挑战状态只需解决一次：
+
+    ```yaml
+    SERVER_NAME: "app.example.com api.example.com shop.example.com"
+    SESSIONS_SECRET: "your-strong-random-secret-key-here"
+    SESSIONS_NAME: "crossdomainsession"
+    # SESSIONS_DOMAIN 是一项 multisite 设置：使用服务器名作为前缀，使其仅应用于匹配的主机
+    app.example.com_SESSIONS_DOMAIN: "example.com"
+    api.example.com_SESSIONS_DOMAIN: "example.com"
+    shop.example.com_SESSIONS_DOMAIN: "example.com"
+    USE_ANTIBOT: "turnstile"
+    ```
+
+=== "跨子域会话（混合租户）"
+
+    当同一个 BunkerWeb 实例托管多个彼此无关的可注册域名时，只应在需要共享 Cookie 的服务器上设置 `SESSIONS_DOMAIN`。未设置的服务器将保留默认的仅主机 Cookie，从而确保租户隔离：
+
+    ```yaml
+    SERVER_NAME: "app.example.com api.example.com billing.acme.org www.unrelated.io"
+    SESSIONS_SECRET: "your-strong-random-secret-key-here"
+    SESSIONS_NAME: "tenantsession"
+    # 仅在 example.com 子域之间共享 Cookie
+    app.example.com_SESSIONS_DOMAIN: "example.com"
+    api.example.com_SESSIONS_DOMAIN: "example.com"
+    # billing.acme.org 和 www.unrelated.io 有意保持为仅主机 Cookie
+    USE_ANTIBOT: "turnstile"
+    ```
+
+    !!! note
+        `SESSIONS_DOMAIN` 必须始终是其所应用服务器的父域名。例如，`example.com` 对 `example.com` 本身以及任意 `*.example.com` 主机都有效，而前导点（`.example.com`）也会因兼容旧配置而被接受。如果将其设置为无关的可注册域名，浏览器将拒绝该 Cookie。
 
 ## SSL
 
@@ -5760,23 +5822,26 @@ STREAM 支持 :x:
 
 Enable SSO authentication for the BunkerWeb web interface by reading headers set by upstream authentication proxies (Authentik, Authelia, Keycloak, Traefik Forward Auth, etc.)
 
-| 参数                          | 默认值              | 上下文 | 可重复 | 描述                                                                                             |
-| ----------------------------- | ------------------- | ------ | ------ | ------------------------------------------------------------------------------------------------ |
-| `USE_UI_SSO`                  | `no`                | global | 否     | Enable or disable UI Single Sign-On authentication for the web interface                         |
-| `UI_SSO_HEADER_USERNAME`      | `X-User`            | global | 否     | HTTP header containing the authenticated username                                                |
-| `UI_SSO_HEADER_EMAIL`         | `X-Email`           | global | 否     | HTTP header containing the user's email address                                                  |
-| `UI_SSO_HEADER_GROUPS`        | `X-Groups`          | global | 否     | HTTP header containing the user's groups (comma or space separated)                              |
-| `UI_SSO_HEADER_NAME`          | `X-Name`            | global | 否     | HTTP header containing the user's display name                                                   |
-| `UI_SSO_TRUSTED_IPS`          | `127.0.0.1,::1`     | global | 否     | Comma-separated list of trusted IP addresses or CIDR ranges that are allowed to send SSO headers |
-| `UI_SSO_AUTO_CREATE_USERS`    | `yes`               | global | 否     | Automatically create new users when they authenticate via SSO for the first time                 |
-| `UI_SSO_DEFAULT_ROLE`         | `reader`            | global | 否     | Default role assigned to new SSO users when no group mapping matches                             |
-| `UI_SSO_GROUP_ADMIN`          |                     | global | 否     | Group name that grants admin role (highest priority)                                             |
-| `UI_SSO_GROUP_WRITER`         |                     | global | 否     | Group name that grants writer role                                                               |
-| `UI_SSO_GROUP_READER`         |                     | global | 否     | Group name that grants reader role                                                               |
-| `UI_SSO_FALLBACK_TO_LOGIN`    | `yes`               | global | 否     | Allow users to fall back to normal login when SSO headers are not present                        |
-| `UI_SSO_UPDATE_USER_ON_LOGIN` | `yes`               | global | 否     | Update user information (email, role) from SSO headers on each login                             |
-| `UI_SSO_ACCOUNT_LINKING`      | `username_or_email` | global | 否     | How to match incoming SSO users to local accounts                                                |
-| `UI_SSO_LOGOUT_REDIRECT_URL`  |                     | global | 否     | URL to redirect users to after logout (e.g., SSO provider logout endpoint)                       |
+| 参数                              | 默认值              | 上下文 | 可重复 | 描述                                                                                                                                        |
+| --------------------------------- | ------------------- | ------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `USE_UI_SSO`                      | `no`                | global | 否     | Enable or disable UI Single Sign-On authentication for the web interface                                                                    |
+| `UI_SSO_PROVIDER`                 | `custom`            | global | 否     | Select your SSO provider to auto-configure headers and group parsing. Use 'Custom' for manual header configuration.                         |
+| `UI_SSO_HEADER_USERNAME`          | `X-User`            | global | 否     | HTTP header containing the authenticated username                                                                                           |
+| `UI_SSO_HEADER_EMAIL`             | `X-Email`           | global | 否     | HTTP header containing the user's email address                                                                                             |
+| `UI_SSO_HEADER_GROUPS`            | `X-Groups`          | global | 否     | HTTP header containing the user's groups (comma or space separated)                                                                         |
+| `UI_SSO_HEADER_NAME`              | `X-Name`            | global | 否     | HTTP header containing the user's display name                                                                                              |
+| `UI_SSO_TRUSTED_IPS`              | `127.0.0.1,::1`     | global | 否     | Comma-separated list of trusted IP addresses or CIDR ranges that are allowed to send SSO headers                                            |
+| `UI_SSO_AUTO_CREATE_USERS`        | `yes`               | global | 否     | Automatically create new users when they authenticate via SSO for the first time                                                            |
+| `UI_SSO_DEFAULT_ROLE`             | `reader`            | global | 否     | Default role assigned to new SSO users when no group mapping matches                                                                        |
+| `UI_SSO_GROUP_ADMIN`              |                     | global | 否     | Group name that grants admin role (highest priority)                                                                                        |
+| `UI_SSO_GROUP_WRITER`             |                     | global | 否     | Group name that grants writer role                                                                                                          |
+| `UI_SSO_GROUP_READER`             |                     | global | 否     | Group name that grants reader role                                                                                                          |
+| `UI_SSO_FALLBACK_TO_LOGIN`        | `yes`               | global | 否     | Allow users to fall back to normal login when SSO headers are not present                                                                   |
+| `UI_SSO_UPDATE_USER_ON_LOGIN`     | `yes`               | global | 否     | Update user information (email) from SSO headers on each login                                                                              |
+| `UI_SSO_SYNC_ROLES`               | `no`                | global | 否     | Synchronize user roles from SSO group mappings on each login when the groups header is present and at least one group mapping is configured |
+| `UI_SSO_SYNC_ROLES_PROTECT_ADMIN` | `yes`               | global | 否     | Prevent SSO role sync from downgrading users who currently have the admin role                                                              |
+| `UI_SSO_ACCOUNT_LINKING`          | `username_or_email` | global | 否     | How to match incoming SSO users to local accounts                                                                                           |
+| `UI_SSO_LOGOUT_REDIRECT_URL`      |                     | global | 否     | URL to redirect users to after logout (e.g., SSO provider logout endpoint)                                                                  |
 
 ## User Manager <img src='../../assets/img/pro-icon.svg' alt='crown pro icon' height='24px' width='24px' style='transform : translateY(3px);'> (PRO)
 
@@ -5979,3 +6044,14 @@ Whitelist、Greylist 和 Blacklist 插件提供的 `*_URLS` 设置共用同一�
 (?:^|\s)FriendlyScanner(?:\s|$)
 TrustedMonitor/\d+\.\d+
 ```
+
+## Wildcard <img src='../../assets/img/pro-icon.svg' alt='crown pro icon' height='24px' width='24px' style='transform : translateY(3px);'> (PRO)
+
+
+STREAM 支持 :x:
+
+Adds wildcard server_name support (*.domain) for services.
+
+| 参数           | 默认值 | 上下文    | 可重复 | 描述                                                                                              |
+| -------------- | ------ | --------- | ------ | ------------------------------------------------------------------------------------------------- |
+| `USE_WILDCARD` | `no`   | multisite | 否     | Enable wildcard server_name for this service (adds *.domain for the first domain in SERVER_NAME). |
