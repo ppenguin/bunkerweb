@@ -6,7 +6,11 @@
   ...
 }: {
   # https://devenv.sh/packages/
-  # packages = [ pkgs.git ];
+  packages = [
+    pkgs.pre-commit
+    pkgs.black
+    pkgs.python311Packages.flake8
+  ];
 
   # https://devenv.sh/languages/
   languages.python = {
