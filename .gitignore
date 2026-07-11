@@ -20,3 +20,5 @@ src/ui/client/templates
 src/ui/static
 src/ui/templates
 .DS_Store
+
+.devenv/
