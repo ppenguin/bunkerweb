@@ -14,8 +14,9 @@ from uuid import uuid4
 from zipfile import BadZipFile, ZipFile
 
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
-from flask_login import login_required
+from flask_login import current_user, login_required
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from werkzeug.routing import BuildError
 from werkzeug.utils import secure_filename
 
 from common_utils import bytes_hash, create_plugin_tar_gz, safe_tar_extractall, safe_zip_extractall  # type: ignore
@@ -43,6 +44,9 @@ def plugins_page():
 def delete_plugin():
     if DB.readonly:
         return Response("Database is in read-only mode", 403)
+
+    if not current_user.admin:
+        return Response("Plugin management is restricted to administrators", 403)
 
     verify_data_in_form(
         data={"plugins": None},
@@ -149,6 +153,9 @@ def run_action(plugin: str, function_name: str = "", *, tmp_dir: Optional[Path] 
     try:
         action_file = tmp_dir.joinpath("actions.py")
         if not action_file.is_file():
+            if function_name == "pre_render":
+                # Mirror the missing pre_render method case: a plugin without an actions file is not a pre-render error
+                return {"status": "ok", "code": 200, "message": "The plugin does not have an action file"}
             return {"status": "ko", "code": 404, "message": "The plugin does not have an action file"}
 
         sys_path.append(tmp_dir.as_posix())
@@ -215,6 +222,10 @@ def run_action(plugin: str, function_name: str = "", *, tmp_dir: Optional[Path] 
 def plugins_refresh():
     if DB.readonly:
         return handle_error("Database is in read-only mode", "plugins")
+
+    if not current_user.admin:
+        return handle_error("Plugin management is restricted to administrators", "plugins")
+
     tmp_ui_path = TMP_DIR.joinpath("ui")
 
     verify_data_in_form(
@@ -403,6 +414,9 @@ def upload_plugin():
     if DB.readonly:
         return {"status": "ko", "message": "Database is in read-only mode"}, 403
 
+    if not current_user.admin:
+        return {"status": "ko", "message": "Plugin management is restricted to administrators"}, 403
+
     if not request.files:
         return {"status": "ko"}, 400
 
@@ -473,6 +487,8 @@ def custom_plugin_page(plugin: str):
         return handle_error("Invalid plugin id, (must be between 1 and 64 characters, only letters, numbers, underscores and hyphens)", "plugins")
 
     if request.method == "POST":
+        if not current_user.admin:
+            return error_message("Plugin management is restricted to administrators"), 403
         action_result = run_action(plugin)
 
         if isinstance(action_result, Response):
@@ -559,6 +575,24 @@ def custom_plugin_page(plugin: str):
 
             tmp_page_dir = tmp_page_dir.joinpath("ui")
             LOGGER.debug(f"Plugin {plugin} page extracted from database successfully")
+
+        # Blueprint-only plugins have neither an actions file nor an embedded template:
+        # send the user to their dedicated page when it is registered instead of
+        # rendering an empty (previously misleading) embedded page
+        if not (tmp_page_dir / "template.html").is_file() and not (tmp_page_dir / "actions.py").is_file():
+            # Only ever delete DB-blob extractions, never a permanent plugin directory
+            if str(tmp_page_dir).startswith(str(TMP_DIR)):
+                rmtree(tmp_page_dir.parent, ignore_errors=True)
+
+            try:
+                return redirect(url_for(f"{plugin}.{plugin}_page"))
+            except BuildError:
+                try:
+                    return redirect(url_for(plugin))
+                except BuildError:
+                    return render_template(
+                        "plugin_page.html", plugin_page="", plugin=plugin_data, is_used=is_used, is_metrics=is_metrics_on, pre_render={}, no_page=True
+                    )
 
         # Execute pre-render action if exists
         pre_render = run_action(plugin, "pre_render", tmp_dir=tmp_page_dir)

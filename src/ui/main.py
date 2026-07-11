@@ -10,26 +10,21 @@ from json import dumps, loads
 from operator import itemgetter
 from os import getenv, getpid, sep
 from os.path import abspath, join
-from re import fullmatch
+from re import fullmatch, split as resplit
 from secrets import token_urlsafe
 from signal import SIGINT, signal, SIGTERM
 from sys import path as sys_path, modules as sys_modules
 from threading import Lock
 from time import time
 from traceback import format_exc
-from warnings import filterwarnings
 
 for deps_path in [join(sep, "usr", "share", "bunkerweb", *paths) for paths in (("deps", "python"), ("utils",), ("api",), ("db",))]:
     if deps_path not in sys_path:
         sys_path.append(deps_path)
 
-# Suppress passlib's pkg_resources deprecation warning
-# This is a known issue in passlib that will be fixed in future versions
-filterwarnings("ignore", message=r".*pkg_resources is deprecated.*", category=UserWarning, module="passlib")
-
 from app.models.safe_session_cache import SafeFileSystemCache
 from flask import Blueprint, Flask, Response, flash as flask_flash, g, jsonify, make_response, redirect, render_template, request, session, url_for
-from flask_login import current_user, LoginManager, login_required
+from flask_login import current_user, LoginManager, login_required, logout_user
 from flask_session import Session
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from jinja2 import ChoiceLoader, FileSystemLoader
@@ -47,11 +42,13 @@ from app.utils import (
     COLUMNS_PREFERENCES_DEFAULTS,
     LIB_DIR,
     LOGGER,
+    STATIC_PATH_PREFIXES,
     _sanitize_internal_next,
     flash,
     get_blacklisted_settings,
     get_filtered_settings,
     get_latest_stable_release,
+    can_delete_service,
     get_multiples,
     handle_stop,
     human_readable_number,
@@ -150,6 +147,7 @@ DB_CHECK_STALE_INTERVAL_SECONDS = 30.0
 DB_CHECK_LAST_RUN_KEY = "DB_STATE_CHECK_LAST_RUN"
 DB_CHECK_RUNNING_KEY = "DB_STATE_CHECK_RUNNING"
 
+# Flask serves app/static/* at the URL root (static_url_path="/"); before_request short-circuits these.
 # Shared thread pool executors for background tasks to prevent thread spawning on every request
 _db_check_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bw-ui-db-check")
 _periodic_tasks_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="bw-ui-periodic")
@@ -599,6 +597,13 @@ with app.app_context():
     app.config["CHECK_PRIVATE_IP"] = getenv("CHECK_PRIVATE_IP", "yes").lower() == "yes"
     app.config["SECRET_KEY"] = FLASK_SECRET
 
+    # Host header allowlist (defense-in-depth). Space/comma separated list of allowed
+    # Host values (wildcards like "*.example.com" supported). Empty = disabled/permissive.
+    _raw_allowed_hosts = getenv("UI_ALLOWED_HOSTS", "").strip()
+    app.config["ALLOWED_HOSTS"] = [h for h in resplit(r"[\s,]+", _raw_allowed_hosts) if h] if _raw_allowed_hosts else []
+    if app.config["ALLOWED_HOSTS"]:
+        LOGGER.info(f"UI Host header allowlist enabled: {app.config['ALLOWED_HOSTS']}")
+
     app.config["SESSION_COOKIE_PATH"] = "/"
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -630,8 +635,29 @@ with app.app_context():
         session_lifetime_hours = 12.0
         LOGGER.warning("Invalid SESSION_LIFETIME_HOURS, defaulting to 12h")
 
+    try:
+        session_absolute_hours = float(getenv("SESSION_ABSOLUTE_HOURS", "168"))
+    except ValueError:
+        session_absolute_hours = 168.0
+        LOGGER.warning("Invalid SESSION_ABSOLUTE_HOURS, defaulting to 168h (7 days)")
+    if session_absolute_hours < session_lifetime_hours:
+        LOGGER.warning(
+            "SESSION_ABSOLUTE_HOURS (%s) is lower than SESSION_LIFETIME_HOURS (%s); clamping to the latter", session_absolute_hours, session_lifetime_hours
+        )
+        session_absolute_hours = session_lifetime_hours
+
+    try:
+        session_rolling_hours = float(getenv("SESSION_ROLLING_HOURS", "0"))
+    except ValueError:
+        session_rolling_hours = 0.0
+        LOGGER.warning("Invalid SESSION_ROLLING_HOURS, defaulting to 0 (disabled)")
+    if session_rolling_hours < 0:
+        session_rolling_hours = 0.0
+
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=session_lifetime_hours)
-    app.config["SESSION_REFRESH_EACH_REQUEST"] = False
+    app.config["SESSION_REFRESH_EACH_REQUEST"] = True
+    app.config["SESSION_ABSOLUTE_SECONDS"] = int(session_absolute_hours * 3600)
+    app.config["SESSION_ROLLING_SECONDS"] = int(session_rolling_hours * 3600)
     app.config["SESSION_ID_LENGTH"] = 64
 
     session_cache_dir = LIB_DIR.joinpath("ui_sessions_cache")
@@ -725,6 +751,7 @@ with app.app_context():
         url_for=custom_url_for,
         is_plugin_active=is_plugin_active,
         is_ui_api_method=is_ui_api_method,
+        can_delete_service=can_delete_service,
     )
 
     app.config.update({hook_info["key"]: [] for hook_info in HOOKS.values()})
@@ -995,8 +1022,115 @@ def schedule_restart_workers():
         _restart_workers_next_allowed = now + RESTART_WORKERS_MIN_INTERVAL_SECONDS
 
 
+def _delete_session_store_entry(sid: str) -> None:
+    """Best-effort delete of a session store entry (Redis key or filesystem cache)."""
+    if not sid:
+        return
+    interface = app.session_interface
+    try:
+        client = getattr(interface, "client", None)
+        key_prefix = getattr(interface, "key_prefix", None)
+        if client is not None and key_prefix is not None:
+            client.delete(f"{key_prefix}{sid}")
+            return
+        cache = getattr(interface, "cache", None)
+        if cache is not None:
+            cache.delete(sid)
+    except Exception:
+        LOGGER.exception("Failed to delete session store entry during rotation/expiry")
+
+
+def _rotate_session_id() -> None:
+    """Mirror lua-resty-session rolling_timeout: generate a fresh session ID and drop the old store entry."""
+    interface = app.session_interface
+    regenerate = getattr(interface, "regenerate", None)
+    if callable(regenerate):
+        try:
+            regenerate(session)
+            session.modified = True
+            return
+        except Exception:
+            LOGGER.exception("Failed to regenerate session id via session_interface; falling back to manual rotation")
+
+    old_sid = getattr(session, "sid", None)
+    new_sid = token_urlsafe(app.config.get("SESSION_ID_LENGTH", 64))
+    _delete_session_store_entry(old_sid)
+    try:
+        session.sid = new_sid  # type: ignore[attr-defined]
+    except Exception:
+        LOGGER.exception("Failed to assign new session id during rotation; aborting rotation")
+        return
+    session.modified = True
+
+
+def _enforce_session_lifetime() -> bool:
+    """Mirror lua-resty-session absolute/rolling timeouts. Returns True if the session was invalidated."""
+    if not current_user.is_authenticated:
+        return False
+
+    creation_date = session.get("creation_date")
+    if not isinstance(creation_date, datetime):
+        return False
+
+    now = datetime.now().astimezone()
+    absolute_seconds = app.config.get("SESSION_ABSOLUTE_SECONDS", 0)
+    if absolute_seconds > 0 and (now - creation_date).total_seconds() > absolute_seconds:
+        LOGGER.info("UI session for user %s exceeded SESSION_ABSOLUTE_HOURS, forcing logout", current_user.get_id())
+        old_sid = getattr(session, "sid", None)
+        logout_user()
+        session.clear()
+        _delete_session_store_entry(old_sid)
+        return True
+
+    rolling_seconds = app.config.get("SESSION_ROLLING_SECONDS", 0)
+    if rolling_seconds > 0:
+        last_rotated_at = session.get("last_rotated_at", creation_date)
+        if isinstance(last_rotated_at, datetime) and (now - last_rotated_at).total_seconds() > rolling_seconds:
+            _rotate_session_id()
+            session["last_rotated_at"] = now
+            session.permanent = True  # ensure the new id inherits the sliding TTL
+
+    return False
+
+
+def _host_allowed(host: str, allowed: list) -> bool:
+    """Return True if the request Host matches the configured allowlist.
+
+    Supports exact matches and "*.example.com" wildcards (which also match the bare
+    domain). The port, if present, is ignored for comparison.
+    """
+    if not host:
+        return False
+    hostname = host.split(":", 1)[0].strip().lower()
+    for entry in allowed:
+        e = entry.strip().lower()
+        if not e:
+            continue
+        if e == "*":
+            return True
+        e = e.split(":", 1)[0]
+        if e.startswith("*."):
+            base = e[2:]
+            if hostname == base or hostname.endswith("." + base):
+                return True
+        elif hostname == e:
+            return True
+    return False
+
+
 @app.before_request
 def before_request():
+    # Skip the per-request lifecycle (UIData lock, CSP nonce, get_metadata) for static assets;
+    # returning None lets the static view still serve the file (after_request supplies the nonce).
+    if request.path.startswith(STATIC_PATH_PREFIXES):
+        return
+
+    # Defense-in-depth: reject unexpected Host headers when an allowlist is configured.
+    allowed_hosts = app.config.get("ALLOWED_HOSTS") or []
+    if allowed_hosts and not _host_allowed(request.host, allowed_hosts):
+        LOGGER.warning(f"Blocking UI request with disallowed Host header: {request.host!r}")
+        return make_response(jsonify({"message": "Invalid host"}), 400)
+
     DATA.load_from_file()
     if DATA.get("SERVER_STOPPING", False):
         response = make_response(jsonify({"message": "Server is shutting down, try again later."}), 503)
@@ -1026,7 +1160,7 @@ def before_request():
                     app.config["REMEMBER_COOKIE_DOMAIN"] = None
                 _cookie_config_detected = True
 
-    if not request.path.startswith(("/css/", "/img/", "/js/", "/json/", "/fonts/", "/libs/", "/locales/")):
+    if not request.path.startswith(STATIC_PATH_PREFIXES):
         metadata = DB.get_metadata()
 
         # Plugin reload trigger
@@ -1071,6 +1205,12 @@ def before_request():
                 session["ip"] = request.remote_addr
             if "user_agent" not in session:
                 session["user_agent"] = request.headers.get("User-Agent")
+            if "last_rotated_at" not in session:
+                session["last_rotated_at"] = session["creation_date"]
+
+            # Enforce absolute and rolling session lifetimes (mirrors lua-resty-session)
+            if _enforce_session_lifetime():
+                return redirect(url_for("login.login_page"))
 
             # Case not login page, keep on 2FA before any other access
             if not session.get("totp_validated", False) and bool(current_user.totp_secret) and "/totp" not in request.path:
@@ -1078,7 +1218,7 @@ def before_request():
                     raw_next = request.values.get("next")
                     try:
                         safe_next = _sanitize_internal_next(raw_next, url_for("home.home_page"))
-                    except Exception:
+                    except ValueError:
                         safe_next = url_for("home.home_page")
 
                     return redirect(url_for("totp.totp_page", next=safe_next))
@@ -1144,6 +1284,9 @@ def before_request():
         x_requested_with = request.headers.get("X-Requested-With")
         is_cors = fetch_mode == "cors" or (x_requested_with and x_requested_with.lower() == "xmlhttprequest")
 
+        # Default to the scheduler-computed flag; refined to a live count below on real page requests.
+        pro_overlapped = metadata["pro_overlapped"]
+
         if not is_cors and current_user.is_authenticated:
             seen = set()
             for f in DATA.get("TO_FLASH", []):
@@ -1153,6 +1296,18 @@ def before_request():
                 seen.add(content)
                 flash(content, f["type"], save=f.get("save", True))
             DATA["TO_FLASH"] = []
+
+            # Live, every-request overlap check — the metadata flag is only refreshed daily by the scheduler.
+            if metadata["is_pro"] and metadata["pro_services"]:
+                pro_overlapped = len(DB.get_services()) > metadata["pro_services"]
+                if pro_overlapped and current_endpoint != "pro":
+                    flash(
+                        "You have more services than allowed by your pro license. "
+                        "Upgrade your license or move some services to draft mode to unlock your pro license.",
+                        "pro",
+                        i18n_key="flash.pro_services_exceeded",
+                        save=False,  # transient toast; keep it out of the notification history
+                    )
 
         data = dict(
             current_endpoint=current_endpoint,
@@ -1164,12 +1319,13 @@ def before_request():
             pro_status=metadata["pro_status"],
             pro_services=metadata["pro_services"],
             pro_expire=metadata["pro_expire"].strftime("%Y/%m/%d") if isinstance(metadata["pro_expire"], datetime) else "Unknown",
-            pro_overlapped=metadata["pro_overlapped"],
+            pro_overlapped=pro_overlapped,
             plugins=BW_CONFIG.get_plugins(),
             flash_messages=session.get("flash_messages", []),
             is_readonly=DATA.get("READONLY_MODE", False) or ("write" not in current_user.list_permissions and not request.path.startswith("/profile")),
             db_readonly=DATA.get("READONLY_MODE", False),
             user_readonly="write" not in current_user.list_permissions,
+            user_admin=current_user.admin,
             theme=theme_value,
             language=language_value,
             supported_languages=SUPPORTED_LANGUAGES,
@@ -1264,11 +1420,7 @@ def set_security_headers(response):
 @app.teardown_request
 def teardown_request(teardown):
     with suppress(AssertionError, RuntimeError):
-        if (
-            not request.path.startswith(("/css/", "/img/", "/js/", "/json/", "/fonts/", "/libs/", "/locales/"))
-            and current_user.is_authenticated
-            and "session_id" in session
-        ):
+        if not request.path.startswith(STATIC_PATH_PREFIXES) and current_user.is_authenticated and "session_id" in session:
             _user_access_executor.submit(mark_user_access, current_user, session["session_id"])
 
     for hook in app.config["TEARDOWN_REQUEST_HOOKS"]:

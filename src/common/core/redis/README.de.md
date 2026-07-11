@@ -1,19 +1,19 @@
-Der Redis-Plugin integriert [Redis](https://redis.io/) oder [Valkey](https://valkey.io/) in BunkerWeb zur Zwischenspeicherung and für schnellen Datenzugriff. Dies ist unerlässlich in Hochverfügbarkeitsumgebungen, um Sitzungen, Metriken and andere Informationen zwischen mehreren Knoten zu teilen.
+Der Redis-Plugin integriert [Redis](https://redis.io/) oder [Valkey](https://valkey.io/) in BunkerWeb zur Zwischenspeicherung und für schnellen Datenzugriff. Dies ist unerlässlich in Hochverfügbarkeitsumgebungen, um Sitzungen, Metriken und andere Informationen zwischen mehreren Knoten zu teilen.
 
 **Funktionsweise:**
 
 1.  Nach der Aktivierung verbindet sich BunkerWeb mit dem konfigurierten Redis-/Valkey-Server.
 2.  Kritische Daten (Sitzungen, Metriken, Sicherheit) werden dort gespeichert.
 3.  Mehrere Instanzen teilen diese Daten für ein reibungsloses Clustering.
-4.  Unterstützt Standalone-Bereitstellungen, passwortbasierte Authentifizierung, SSL/TLS and Redis Sentinel.
-5.  Automatische Wiederverbindung and konfigurierbare Timeouts sorgen für Robustheit.
+4.  Unterstützt Standalone-Bereitstellungen, passwortbasierte Authentifizierung, SSL/TLS und Redis Sentinel.
+5.  Automatische Wiederverbindung und konfigurierbare Timeouts sorgen für Robustheit.
 
 ### Verwendung
 
-1.  **Aktivieren:** `USE_REDIS: yes`.
-2.  **Verbindung:** Host/IP and Port.
+1.  **Aktivieren:** Setzen Sie den Parameter `USE_REDIS` auf `yes`.
+2.  **Verbindung:** Host/IP und Port.
 3.  **Sicherheit:** Anmeldeinformationen, falls erforderlich.
-4.  **Erweitert:** Datenbank, SSL and Timeouts.
+4.  **Erweitert:** Datenbank, SSL und Timeouts.
 5.  **Hochverfügbarkeit:** Konfigurieren Sie Sentinel, falls verwendet.
 
 ### Parameter
@@ -21,20 +21,20 @@ Der Redis-Plugin integriert [Redis](https://redis.io/) oder [Valkey](https://val
 | Parameter                 | Standard   | Kontext | Mehrfach | Beschreibung                                                  |
 | :------------------------ | :--------- | :------ | :------- | :------------------------------------------------------------ |
 | `USE_REDIS`               | `no`       | global  | nein     | Aktiviert die Redis-/Valkey-Integration (Cluster-Modus).      |
-| `REDIS_HOST`              |            | global  | nein     | Host/IP des Redis-/Valkey-Servers.                            |
+| `REDIS_HOST`              |            | global  | nein     | Host/IP des Redis-/Valkey-Servers. Nicht erforderlich, wenn `REDIS_SENTINEL_HOSTS` gesetzt ist (der Master wird über die Sentinels aufgelöst). |
 | `REDIS_PORT`              | `6379`     | global  | nein     | Redis-/Valkey-Port.                                           |
 | `REDIS_DATABASE`          | `0`        | global  | nein     | Datenbanknummer (0–15).                                       |
 | `REDIS_SSL`               | `no`       | global  | nein     | Aktiviert SSL/TLS.                                            |
 | `REDIS_SSL_VERIFY`        | `yes`      | global  | nein     | Überprüft das SSL-Zertifikat des Servers.                     |
-| `REDIS_TIMEOUT`           | `5`        | global  | nein     | Timeout (Sekunden).                                           |
+| `REDIS_TIMEOUT`           | `1000`     | global  | nein     | Timeout (ms) für Verbindung/Lesen/Schreiben.                 |
 | `REDIS_USERNAME`          |            | global  | nein     | Benutzername (Redis ≥ 6.0).                                   |
 | `REDIS_PASSWORD`          |            | global  | nein     | Passwort.                                                     |
 | `REDIS_SENTINEL_HOSTS`    |            | global  | nein     | Sentinel-Hosts (durch Leerzeichen getrennt, `host:port`).     |
 | `REDIS_SENTINEL_USERNAME` |            | global  | nein     | Sentinel-Benutzer.                                            |
 | `REDIS_SENTINEL_PASSWORD` |            | global  | nein     | Sentinel-Passwort.                                            |
 | `REDIS_SENTINEL_MASTER`   | `mymaster` | global  | nein     | Name des Sentinel-Masters.                                    |
-| `REDIS_KEEPALIVE_IDLE`    | `300`      | global  | nein     | TCP-Keepalive-Intervall (Sekunden) für inaktive Verbindungen. |
-| `REDIS_KEEPALIVE_POOL`    | `3`        | global  | nein     | Maximale Anzahl der im Pool gehaltenen Verbindungen.          |
+| `REDIS_KEEPALIVE_IDLE`    | `30000`    | global  | nein     | Maximale Leerlaufzeit (ms), bevor eine gepoolte Redis-/Valkey-Verbindung geschlossen wird. |
+| `REDIS_KEEPALIVE_POOL`    | `10`       | global  | nein     | Maximale Anzahl der im Pool gehaltenen Verbindungen.          |
 
 !!! tip "Hochverfügbarkeit"
     Konfigurieren Sie Redis Sentinel für ein automatisches Failover in der Produktion.
@@ -84,6 +84,7 @@ Der Redis-Plugin integriert [Redis](https://redis.io/) oder [Valkey](https://val
 
     ```yaml
     USE_REDIS: "yes"
+    # REDIS_HOST ist nicht erforderlich: Der Master wird über die Sentinels aufgelöst
     REDIS_SENTINEL_HOSTS: "sentinel1:26379 sentinel2:26379 sentinel3:26379"
     REDIS_SENTINEL_MASTER: "mymaster"
     REDIS_SENTINEL_PASSWORD: "sentinel-password"
@@ -100,10 +101,19 @@ Der Redis-Plugin integriert [Redis](https://redis.io/) oder [Valkey](https://val
     REDIS_PORT: "6379"
     REDIS_PASSWORD: "your-strong-password"
     REDIS_DATABASE: "3"
-    REDIS_TIMEOUT: "3"
-    REDIS_KEEPALIVE_IDLE: "60"
+    REDIS_TIMEOUT: "3000"
+    REDIS_KEEPALIVE_IDLE: "60000"
     REDIS_KEEPALIVE_POOL: "5"
     ```
+
+!!! info "Redis auf Kubernetes (vom Scheduler gesteuerte Konfiguration)"
+    Auf Kubernetes liest der **Scheduler** die Einstellungen und überträgt die generierte
+    Konfiguration an die BunkerWeb-Instanzen — die Instanzen lesen diese Redis-Einstellungen nicht aus
+    ihrer eigenen Pod-Umgebung. Konfigurieren Sie Redis mit dem offiziellen Helm-Chart unter
+    `settings.redis`, einschließlich Sentinel über `settings.redis.redisSentinelHosts` und
+    `settings.redis.redisSentinelMaster` (Chart ≥ v1.0.21). Für jede Einstellung ohne dedizierten
+    Chart-Schlüssel verwenden Sie `scheduler.extraEnvs`. Werden sie nur auf `bunkerweb.extraEnvs`
+    gesetzt, hat dies **keine Wirkung**.
 
 ### Redis Best Practices
 
@@ -111,7 +121,8 @@ Berücksichtigen Sie bei der Verwendung von Redis oder Valkey mit BunkerWeb dies
 
 #### Speicherverwaltung
 - **Speichernutzung überwachen:** Konfigurieren Sie Redis mit geeigneten `maxmemory`-Einstellungen, um Fehler wegen unzureichendem Speicher zu vermeiden
-- **Verdrängungsrichtlinie festlegen:** Verwenden Sie eine für Ihren Anwendungsfall geeignete `maxmemory-policy` (z. B. `volatile-lru` oder `allkeys-lru`)
+- **Verdrängungsrichtlinie festlegen:** Verwenden Sie eine für Ihren Anwendungsfall geeignete `maxmemory-policy` (z. B. `volatile-lru` für den allgemeinen Einsatz oder `allkeys-lru` für stark cache-lastige Workloads)
+- **All-in-One-Standards:** Das AIO-Docker-Image liefert Redis bereits mit `maxmemory=256mb` und `maxmemory-policy=volatile-lru` aus; überschreiben Sie dies über die Umgebungsvariablen `REDIS_MAXMEMORY` und `REDIS_MAXMEMORY_POLICY`. Mit `volatile-lru` werden temporäre Zähler (Rate-Limit, Bad-Behavior) vor Schlüsseln mit für Sessions und befristete Sperren wichtigen TTLs verdrängt, und Schlüssel ohne Ablaufzeit (dauerhafte Sperren) bleiben unangetastet. Dieselbe Richtlinie wird auch für externe Redis- oder Valkey-Server empfohlen.
 - **Große Schlüssel vermeiden:** Stellen Sie sicher, dass einzelne Redis-Schlüssel eine angemessene Größe behalten, um Leistungseinbußen zu vermeiden
 
 #### Datenpersistenz

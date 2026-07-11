@@ -9,10 +9,95 @@ local logger = clogger:new("DATASTORE")
 local ERR = ngx.ERR
 local subsystem = ngx.config.subsystem
 local shared = ngx.shared
+local match = string.match
 
-local lru, err_lru = lrucache.new(100000)
+-- Default slot count for the per-worker LRU shared by all datastore instances.
+-- Overridden via the DATASTORE_LRU_SIZE global setting on the first worker-LRU
+-- read/write once the variables store has been populated (lazy: utils.get_variable
+-- depends on this very module so resolution is deferred to first call).
+local DEFAULT_DATASTORE_LRU = 1000
+
+local lru, err_lru = lrucache.new(DEFAULT_DATASTORE_LRU)
 if not lru then
 	logger:log(ERR, "failed to instantiate LRU cache : " .. err_lru)
+end
+
+-- Parse a count value with optional SI shorthand suffix: "1000", "1k", "10K", "1m".
+-- k/K = x1000, m/M = x1_000_000. Returns the integer count, or nil if value is
+-- missing or unparsable.
+local function parse_count(value)
+	if value == nil or value == "" then
+		return nil
+	end
+	local num_str, suffix = match(tostring(value), "^(%d+)([kKmM]?)$")
+	if not num_str then
+		return nil
+	end
+	local num = tonumber(num_str)
+	if not num then
+		return nil
+	end
+	if suffix == "k" or suffix == "K" then
+		return num * 1000
+	elseif suffix == "m" or suffix == "M" then
+		return num * 1000000
+	end
+	return num
+end
+
+-- Migrate every live entry from the old LRU into a freshly-sized one, preserving
+-- per-entry user_flags. The only entries present at resize time are the permanent
+-- bootstrap keys (variables/plugins/plugin_*/plugins_order) written during
+-- init_by_lua before any request-time TTL cache exists, so re-inserting with
+-- ttl=nil keeps them permanent. get_keys/get are direct lrucache calls (no
+-- datastore re-entry), so the lru_configuring guard is unaffected.
+local function migrate_lru(old_lru, new_lru)
+	for _, key in ipairs(old_lru:get_keys(0)) do
+		local value, _, flags = old_lru:get(key)
+		if value ~= nil then
+			new_lru:set(key, value, nil, flags)
+		end
+	end
+	return new_lru
+end
+
+local lru_configured = false
+local lru_configuring = false
+local function ensure_lru_sized()
+	if lru_configured or lru_configuring then
+		return
+	end
+	lru_configuring = true
+	-- Lazy require to avoid circular load (utils requires this module at the top).
+	local ok_utils, utils = pcall(require, "bunkerweb.utils")
+	if not ok_utils or type(utils.get_variable) ~= "function" then
+		lru_configuring = false
+		return
+	end
+	-- utils.get_variable reads internalstore via the worker LRU, which re-enters
+	-- this module; the lru_configuring guard short-circuits the recursion.
+	local value = utils.get_variable("DATASTORE_LRU_SIZE", false)
+	lru_configuring = false
+	if value == nil then
+		-- Variables not yet populated; retry on next call.
+		return
+	end
+	lru_configured = true
+	local size = parse_count(value)
+	-- Only ever grow the shared bootstrap LRU. A size at or below the default could
+	-- LRU-evict the init-time bootstrap entries (variables/plugins/...) and deadlock
+	-- startup (bug #3618), so sizes <= default keep the safe default-sized cache.
+	if not size or size <= DEFAULT_DATASTORE_LRU then
+		return
+	end
+	local new_lru, err = lrucache.new(size)
+	if not new_lru then
+		logger:log(ERR, "failed to resize datastore LRU to " .. size .. " : " .. err)
+		return
+	end
+	-- Carry existing entries over before swapping so init-time bootstrap data
+	-- (written into the old LRU during init_by_lua) survives the resize.
+	lru = lru and migrate_lru(lru, new_lru) or new_lru
 end
 
 function datastore:initialize(dict)
@@ -29,6 +114,7 @@ function datastore:get(key, worker)
 	-- luacheck: ignore 431
 	local value, err
 	if worker then
+		ensure_lru_sized()
 		if not lru then
 			return nil, "lru is not instantiated"
 		end
@@ -44,6 +130,7 @@ end
 
 function datastore:set(key, value, exptime, worker)
 	if worker then
+		ensure_lru_sized()
 		if not lru then
 			return false, "lru is not instantiated"
 		end
@@ -96,7 +183,7 @@ function datastore:keys(worker)
 		if not lru then
 			return false, "lru is not instantiated"
 		end
-		return lru:keys(0)
+		return lru:get_keys(0)
 	end
 	return self.dict:get_keys(0)
 end
@@ -122,7 +209,7 @@ function datastore:delete_all(pattern, worker)
 		if not lru then
 			return false, "lru is not instantiated"
 		end
-		keys = lru:keys(0)
+		keys = lru:get_keys(0)
 	else
 		keys = self.dict:get_keys(0)
 	end

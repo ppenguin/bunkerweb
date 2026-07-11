@@ -10,7 +10,7 @@ Comment ça marche :
 
 ### Comment l’utiliser
 
-1. Activer : `USE_REDIS: yes`.
+1. Activer : mettez le paramètre `USE_REDIS` à `yes`.
 2. Connexion : hôte/IP et port.
 3. Sécurité : identifiants si requis.
 4. Avancé : base, SSL et timeouts.
@@ -21,20 +21,20 @@ Comment ça marche :
 | Paramètre                 | Défaut     | Contexte | Multiple | Description                                                    |
 | ------------------------- | ---------- | -------- | -------- | -------------------------------------------------------------- |
 | `USE_REDIS`               | `no`       | global   | non      | Activer l’intégration Redis/Valkey (mode cluster).             |
-| `REDIS_HOST`              |            | global   | non      | Hôte/IP du serveur Redis/Valkey.                               |
+| `REDIS_HOST`              |            | global   | non      | Hôte/IP du serveur Redis/Valkey. Inutile lorsque `REDIS_SENTINEL_HOSTS` est défini (le master est résolu via les Sentinels). |
 | `REDIS_PORT`              | `6379`     | global   | non      | Port Redis/Valkey.                                             |
 | `REDIS_DATABASE`          | `0`        | global   | non      | Numéro de base (0–15).                                         |
 | `REDIS_SSL`               | `no`       | global   | non      | Activer SSL/TLS.                                               |
 | `REDIS_SSL_VERIFY`        | `yes`      | global   | non      | Vérifier le certificat SSL du serveur.                         |
-| `REDIS_TIMEOUT`           | `5`        | global   | non      | Timeout (secondes).                                            |
+| `REDIS_TIMEOUT`           | `1000`     | global   | non      | Timeout (ms) pour connexion/lecture/écriture.                  |
 | `REDIS_USERNAME`          |            | global   | non      | Nom d’utilisateur (Redis ≥ 6.0).                               |
 | `REDIS_PASSWORD`          |            | global   | non      | Mot de passe.                                                  |
 | `REDIS_SENTINEL_HOSTS`    |            | global   | non      | Hôtes Sentinel (séparés par espaces, `hôte:port`).             |
 | `REDIS_SENTINEL_USERNAME` |            | global   | non      | Utilisateur Sentinel.                                          |
 | `REDIS_SENTINEL_PASSWORD` |            | global   | non      | Mot de passe Sentinel.                                         |
 | `REDIS_SENTINEL_MASTER`   | `mymaster` | global   | non      | Nom du master Sentinel.                                        |
-| `REDIS_KEEPALIVE_IDLE`    | `300`      | global   | non      | Intervalle keepalive TCP (secondes) pour connexions inactives. |
-| `REDIS_KEEPALIVE_POOL`    | `3`        | global   | non      | Nb max de connexions conservées dans le pool.                  |
+| `REDIS_KEEPALIVE_IDLE`    | `30000`    | global   | non      | Temps d’inactivité max (ms) avant fermeture d’une connexion du pool. |
+| `REDIS_KEEPALIVE_POOL`    | `10`       | global   | non      | Nb max de connexions conservées dans le pool.                  |
 
 !!! tip "Haute disponibilité"
     Configurez Redis Sentinel pour un failover automatique en production.
@@ -83,6 +83,7 @@ Comment ça marche :
 
     ```yaml
     USE_REDIS: "yes"
+    # REDIS_HOST est inutile : le master est résolu via les Sentinels
     REDIS_SENTINEL_HOSTS: "sentinel1:26379 sentinel2:26379 sentinel3:26379"
     REDIS_SENTINEL_MASTER: "mymaster"
     REDIS_SENTINEL_PASSWORD: "sentinel-password"
@@ -99,10 +100,18 @@ Comment ça marche :
     REDIS_PORT: "6379"
     REDIS_PASSWORD: "your-strong-password"
     REDIS_DATABASE: "3"
-    REDIS_TIMEOUT: "3"
-    REDIS_KEEPALIVE_IDLE: "60"
+    REDIS_TIMEOUT: "3000"
+    REDIS_KEEPALIVE_IDLE: "60000"
     REDIS_KEEPALIVE_POOL: "5"
     ```
+
+!!! info "Redis sur Kubernetes (configuration pilotée par le scheduler)"
+    Sur Kubernetes, c’est le **scheduler** qui lit les paramètres et pousse la configuration générée
+    vers les instances BunkerWeb — les instances ne lisent pas ces paramètres Redis depuis leur propre
+    environnement de pod. Avec le chart Helm officiel, configurez Redis sous `settings.redis`, y
+    compris Sentinel via `settings.redis.redisSentinelHosts` et `settings.redis.redisSentinelMaster`
+    (chart ≥ v1.0.21). Pour tout paramètre sans clé dédiée dans le chart, utilisez
+    `scheduler.extraEnvs`. Les définir uniquement sur `bunkerweb.extraEnvs` n’a **aucun effet**.
 
 ### Bonnes pratiques Redis
 
@@ -110,7 +119,8 @@ Lorsque vous utilisez Redis ou Valkey avec BunkerWeb, prenez en compte ces bonne
 
 #### Gestion de la mémoire
 - **Surveillez l'utilisation de la mémoire :** Configurez Redis avec des paramètres `maxmemory` appropriés pour éviter les erreurs de mémoire insuffisante
-- **Définissez une politique d'éviction :** Utilisez une `maxmemory-policy` (par exemple, `volatile-lru` ou `allkeys-lru`) adaptée à votre cas d'utilisation
+- **Définissez une politique d'éviction :** Utilisez une `maxmemory-policy` (par exemple, `volatile-lru` pour un usage général ou `allkeys-lru` pour les charges de travail à forte composante cache) adaptée à votre cas d'utilisation
+- **Valeurs par défaut de l'all-in-one :** L'image Docker AIO livre Redis avec `maxmemory=256mb` et `maxmemory-policy=volatile-lru` ; remplacez ces valeurs via les variables d'environnement `REDIS_MAXMEMORY` et `REDIS_MAXMEMORY_POLICY`. Avec `volatile-lru`, les compteurs transitoires (rate-limit, bad-behavior) sont évincés avant les clés dont la TTL est importante pour les sessions et les bannissements temporaires, et les clés sans expiration (bannissements permanents) restent intactes. La même politique est recommandée pour les serveurs Redis ou Valkey externes utilisés par BunkerWeb.
 - **Évitez les clés volumineuses :** Assurez-vous que les clés Redis individuelles restent d'une taille raisonnable pour éviter la dégradation des performances
 
 #### Persistance des données

@@ -20,6 +20,8 @@ class SwarmController(Controller):
         super().__init__("swarm")
         self.__client = DockerClient(base_url=docker_host)
         self.__internal_lock = Lock()
+        # Protected alias so the base-class settings recheck worker shares the same lock object.
+        self._internal_lock = self.__internal_lock
         self.__swarm_instances = []
         self.__swarm_services = []
         self.__swarm_configs = []
@@ -115,7 +117,10 @@ class SwarmController(Controller):
         self.__swarm_instances.append(controller_instance.id)
         instances = []
         instance_env = {}
-        for env in controller_instance.attrs["Spec"]["TaskTemplate"]["ContainerSpec"]["Env"]:
+        container_spec = controller_instance.attrs.get("Spec", {}).get("TaskTemplate", {}).get("ContainerSpec", {}) or {}
+        for env in container_spec.get("Env") or []:
+            if "=" not in env:
+                continue
             variable, value = env.split("=", 1)
             instance_env[variable] = value
 
@@ -177,12 +182,13 @@ class SwarmController(Controller):
             self.__swarm_configs.append(config.id)
         return configs
 
-    def apply_config(self) -> bool:
+    def apply_config(self, force: bool = False) -> bool:
         return self.apply(
             self._instances,
             self._services,
             configs=self._configs,
             first=not self._loaded,
+            force=force,
         )
 
     def __process_event(self, event):
@@ -312,7 +318,7 @@ class SwarmController(Controller):
                     sleep(10)
 
     def process_events(self):
-        self._set_autoconf_load_db()
+        self._start_settings_recheck_worker()
         event_types = ("service", "config")
         threads = [Thread(target=self.__event, args=(event_type,)) for event_type in event_types]
         for thread in threads:
